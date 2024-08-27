@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Literal as _Literal
 from packaging.version import Version as _Version, InvalidVersion as _InvalidVersion
 
+from versionman.exception import pep440_semver as _exception
+
 
 class PEP440SemVer:
     def __init__(self, version: str):
@@ -10,11 +12,15 @@ class PEP440SemVer:
         try:
             self._version = _Version(version)
         except _InvalidVersion:
-            raise ValueError(f"Invalid version: {version}")
+            raise _exception.VersionManInvalidPEP440SemVerError(version)
         if len(self._version.release) != 3:
-            raise ValueError(f"Invalid version: {version}")
+            raise _exception.VersionManInvalidPEP440SemVerError(
+                version, "Release segment must have exactly three numbers"
+            )
         if self._version.local:
-            raise ValueError(f"Invalid version: {version}")
+            raise _exception.VersionManInvalidPEP440SemVerError(
+                version, "Local segment is not allowed"
+            )
         return
 
     @property
@@ -171,3 +177,79 @@ class PEP440SemVer:
         if isinstance(other, PEP440SemVer):
             return self._version.__ge__(other._version)
         raise TypeError(f"Cannot compare PEP440SemVer with {type(other)}")
+
+
+def from_tag(tag: str, version_tag_prefix: str = "") -> PEP440SemVer:
+    """Create a PEP440SemVer from a tag.
+
+    Parameters
+    ----------
+    tag : string
+        Tag to convert to a PEP440SemVer object.
+    version_tag_prefix : string, default: ""
+        Prefix to remove from the tag to obtain the version string.
+
+    Returns
+    -------
+    version: PEP440SemVer
+        PEP440SemVer object created from the tag.
+    """
+    return PEP440SemVer(tag.removeprefix(version_tag_prefix))
+
+
+def latest_version_from_tags(
+    tags: list[str | list[str]],
+    version_tag_prefix: str = "",
+    release_types: tuple[_Literal["final", "pre", "post", "dev"], ...] = ("final", "pre", "post", "dev"),
+    ignore_non_version_tags: bool = True,
+) -> PEP440SemVer | None:
+    """Get the latest version from a list of (e.g., git) tags.
+
+    Parameters
+    ----------
+    tags : list
+        A sequence of tags or groups of tags, e.g., a list where each element is either a string
+        or a list of strings. The main list is expected to be sorted in descending order of relevance,
+        e.g., if the order is based on commit date, the most recent commit should be first.
+        When an element is a list, the tags in the list are considered to have the same relevance,
+        e.g., point to the same commit.
+    version_tag_prefix : string, default: ""
+        If given, only tags starting with this prefix are considered.
+    release_types : tuple, default: ("final", "pre", "post", "dev")
+        Type of release versions to consider. By default, all types are considered.
+    ignore_non_version_tags : boolean, default: True
+        If set to False, any tag with the given prefix (by default, all tags) that is not a valid
+        version tag will raise an error. Otherwise (default), such tags are ignored.
+
+    Returns
+    -------
+    latest_version: PEP440SemVer | None
+        Latest version found in the tags, or None if no version tag is found.
+    """
+
+    def get_latest_version(tags_list: list[str]) -> PEP440SemVer | None:
+        ver_tags = []
+        for tag in tags_list:
+            if tag.startswith(version_tag_prefix):
+                try:
+                    version = PEP440SemVer(tag.removeprefix(version_tag_prefix))
+                except _exception.VersionManInvalidPEP440SemVerError as e:
+                    if ignore_non_version_tags:
+                        continue
+                    raise e
+                ver_tags.append(version)
+        if not ver_tags:
+            return
+        ver_tags = sorted(ver_tags, reverse=True)
+        for ver_tag in ver_tags:
+            if ver_tag.release_type in release_types:
+                return ver_tag
+        return
+
+    for tag_group in tags:
+        if isinstance(tag_group, str):
+            tag_group = [tag_group]
+        latest_version = get_latest_version(tag_group)
+        if latest_version:
+            return latest_version
+    return
