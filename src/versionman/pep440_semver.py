@@ -110,7 +110,7 @@ class PEP440SemVer:
             raise ValueError("Cannot increment post version of dev version")
         base = self.base
         if self.pre:
-            base += f".{self.pre[0]}{self.pre[1]}"
+            base += f"{self.pre[0]}{self.pre[1]}"
         if self.post is None:
             return PEP440SemVer(f"{base}.post0")
         return PEP440SemVer(f"{base}.post{self.post + 1}")
